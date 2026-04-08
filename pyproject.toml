@@ -1,0 +1,14 @@
+[project]
+name = "rag-api"
+version = "0.1.0"
+description = "Simple test of a Retrieval Augmented Generation endpoint"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "flask",
+    "python-dotenv",
+    "openai",
+    "numpy",
+    "scikit-learn",
+    "requests",
+]

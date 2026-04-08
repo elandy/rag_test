@@ -1,0 +1,16 @@
+curl -X POST http://127.0.0.1:5000/ask -H "Content-Type: application/json" -d '{"question": "Hows the weather where Tony lives?"}'
+
+{
+  "answer": "Based on the provided context from Doc 2, which describes the climate of LLamaland as \"arctic\", I can infer that the weather where Tony lives (in LLamaland) is likely cold and possibly snowy or icy.",
+  "question": "Hows the weather where Tony lives?",
+  "sources": [
+    {
+      "score": 1.05,
+      "text": "Tony, the purple dog, hates the taste of melons, and lives in the country of LLamaland"
+    },
+    {
+      "score": 0.7413551265422129,
+      "text": "LLamaland's climate is arctic"
+    }
+  ]
+}
