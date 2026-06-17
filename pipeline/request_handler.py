@@ -26,7 +26,7 @@ def handle_ask(request):
 
     # retrieval
     docs = retriever.retrieve_docs_multi_hop(query, k)
-    filtered_docs = retriever.filter_docs(docs)
+    filtered_docs = retriever.filter_docs(query, docs)
 
     if not filtered_docs:
         return jsonify({
@@ -43,7 +43,16 @@ def handle_ask(request):
     return jsonify({
         "question": query,
         "answer": answer,
-        "sources": [{"text": d, "score": s} for d, s in filtered_docs],
+        "sources": [
+            {
+                "id": doc["id"],
+                "source": doc["source"],
+                "chunk_index": doc["chunk_index"],
+                "text": doc["text"],
+                "score": score,
+            }
+            for doc, score in filtered_docs
+        ],
         "suspicious": suspicious,
         "request_id": request_id,
     })

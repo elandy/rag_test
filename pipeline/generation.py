@@ -4,10 +4,14 @@ from typing import Tuple
 from services.llm_client import cached_generate
 
 
-def generate_answer(query: str, docs: list[Tuple[str, float]]) -> str:
-    texts = [doc for doc, _ in docs]
+def generate_answer(query: str, docs: list[Tuple[dict, float]]) -> str:
     context = "\n\n".join(
-        f"[Doc {i + 1}]\n{doc}" for i, doc in enumerate(texts)
+        (
+            f"[Doc {i + 1}] "
+            f"(source={doc['source']}, chunk={doc['chunk_index']})\n"
+            f"{doc['text']}"
+        )
+        for i, (doc, _) in enumerate(docs)
     )
 
     prompt = f"""

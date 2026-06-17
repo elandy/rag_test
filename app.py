@@ -1,5 +1,12 @@
+import logging
+
 from flask import Flask, request
 from pipeline.request_handler import handle_ask
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 app = Flask(__name__)
 

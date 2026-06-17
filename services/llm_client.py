@@ -1,3 +1,4 @@
+import logging
 import random
 from functools import lru_cache
 from time import sleep
@@ -7,6 +8,7 @@ import requests
 
 OLLAMA_URL = "http://localhost:11434/api/generate"
 MODEL = "llama3.1:8b"
+logger = logging.getLogger(__name__)
 
 class RateLimitError(Exception):
     pass
@@ -18,19 +20,19 @@ def generate_response(prompt: str) -> Optional[str]:
 
     for attempt in range(MAX_RETRIES):
         try:
-            print(f"[LLM] Attempt {attempt + 1}")
+            logger.debug("LLM generate attempt=%s", attempt + 1)
             return call_llm(prompt)
 
         except (RateLimitError, TimeoutError, ConnectionError, RuntimeError) as e:
-            print(f"[LLM] Retryable error: {e}. Retrying in {backoff}s...")
+            logger.warning("Retryable LLM error: %s. Retrying in %ss", e, backoff)
             sleep(backoff + random.uniform(0, 0.5))
             backoff *= 2
 
         except ValueError as e:
-            print(f"[LLM] Non-retryable error: {e}")
+            logger.error("Non-retryable LLM error: %s", e)
             return None
 
-    print("[LLM] Failed after retries")
+    logger.error("LLM failed after retries")
     return None
 
 @lru_cache(maxsize=100)
