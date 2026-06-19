@@ -2,13 +2,12 @@ import uuid
 
 from flask import jsonify
 
-from data.docs import DOCUMENTS
 from pipeline.generation import generate_answer
 from pipeline.retrieval import Retriever
 from pipeline.validation import parse_and_validate_request, ValidationError
 from services.vector_store import VectorStore
 
-vector_store = VectorStore(DOCUMENTS)
+vector_store = VectorStore()
 retriever = Retriever(vector_store)
 
 def handle_ask(request):
@@ -26,9 +25,8 @@ def handle_ask(request):
 
     # retrieval
     docs = retriever.retrieve_docs_multi_hop(query, k)
-    filtered_docs = retriever.filter_docs(query, docs)
 
-    if not filtered_docs:
+    if not docs:
         return jsonify({
             "question": query,
             "answer": "I don't know",
@@ -38,7 +36,7 @@ def handle_ask(request):
         })
 
     # generation
-    answer = generate_answer(query, filtered_docs)
+    answer = generate_answer(query, docs)
 
     return jsonify({
         "question": query,
@@ -51,7 +49,7 @@ def handle_ask(request):
                 "text": doc["text"],
                 "score": score,
             }
-            for doc, score in filtered_docs
+            for doc, score in docs
         ],
         "suspicious": suspicious,
         "request_id": request_id,

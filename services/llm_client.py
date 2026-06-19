@@ -1,4 +1,5 @@
 import logging
+import os
 import random
 from functools import lru_cache
 from time import sleep
@@ -6,7 +7,10 @@ from typing import Optional
 
 import requests
 
-OLLAMA_URL = "http://localhost:11434/api/generate"
+OLLAMA_HOST = os.getenv(
+    "OLLAMA_HOST",
+    "http://localhost:11434"
+)
 MODEL = "llama3.1:8b"
 logger = logging.getLogger(__name__)
 
@@ -49,7 +53,7 @@ def call_llm(prompt: str, timeout: int = 100) -> str:
 
     try:
         response = requests.post(
-            OLLAMA_URL,
+            f'{OLLAMA_HOST}/api/generate',
             json=payload,
             timeout=timeout
         )
@@ -57,8 +61,8 @@ def call_llm(prompt: str, timeout: int = 100) -> str:
     except requests.exceptions.Timeout:
         raise TimeoutError("LLM request timed out")
 
-    except requests.exceptions.ConnectionError:
-        raise ConnectionError("LLM connection failed")
+    except requests.exceptions.ConnectionError as e:
+        raise RuntimeError(f"Ollama connection error: {e}")
 
     if response.status_code == 429:
         raise RateLimitError("Rate limit exceeded")
@@ -70,5 +74,14 @@ def call_llm(prompt: str, timeout: int = 100) -> str:
         # non-retryable
         raise ValueError(f"Bad request: {response.text}")
 
+    logger.debug("LLM raw response: %s", response.text)
+
     data = response.json()
-    return data.get("response", "")
+
+    if "error" in data:
+        raise RuntimeError(f"Ollama error: {data['error']}")
+
+    if "response" not in data:
+        raise RuntimeError(f"Unexpected Ollama response shape: {data}")
+
+    return data["response"]

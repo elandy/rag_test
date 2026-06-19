@@ -7,8 +7,9 @@ requires-python = ">=3.12"
 dependencies = [
     "flask",
     "python-dotenv",
-    "openai",
     "numpy",
     "scikit-learn",
     "requests",
+    "psycopg2[binary]>=2.9.12",
+    "pgvector>=0.4.2",
 ]

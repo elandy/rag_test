@@ -1,0 +1,84 @@
+services:
+
+  rag-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: rag-api
+
+    env_file:
+      - .env
+
+    ports:
+      - "8000:8000"
+
+    volumes:
+      - ./data:/app/data
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    environment:
+      PG_DSN: postgresql://rag:rag@postgres:5432/rag
+      OLLAMA_HOST: http://host.docker.internal:11434
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    restart: unless-stopped
+
+  postgres:
+    image: pgvector/pgvector:pg17
+
+    container_name: rag-postgres
+
+    environment:
+      POSTGRES_USER: rag
+      POSTGRES_PASSWORD: rag
+      POSTGRES_DB: rag
+
+    ports:
+      - "5432:5432"
+
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
+
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U rag -d rag"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+    restart: unless-stopped
+
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: rag-ingest
+
+    env_file:
+      - .env
+
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+    environment:
+      PG_DSN: postgresql://rag:rag@postgres:5432/rag
+      OLLAMA_HOST: http://host.docker.internal:11434
+
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+    command: ["python", "ingest.py"]
+
+    restart: "no"
+    
+volumes:
+  postgres_data:
+

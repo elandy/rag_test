@@ -1,104 +1,80 @@
 import logging
 import re
 
-
 logger = logging.getLogger(__name__)
 
 STOPWORDS = {
-    "a",
-    "an",
-    "and",
-    "are",
-    "as",
-    "at",
-    "be",
-    "by",
-    "for",
-    "from",
-    "how",
-    "hows",
-    "in",
-    "is",
-    "it",
-    "of",
-    "on",
-    "or",
-    "the",
-    "to",
-    "what",
-    "where",
-    "who",
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from",
+    "how", "hows", "in", "is", "it", "of", "on", "or", "the", "to",
+    "what", "where", "who",
 }
 
 
 class Retriever:
-    def __init__(self, vector_store, min_score: float = 0.3):
+    def __init__(self, vector_store, min_distance: float = 0.6):
+        """
+        min_distance:
+            cosine distance threshold (0 = perfect match, 1 = unrelated)
+        """
         self.vector_store = vector_store
-        self.min_score = min_score
+        self.min_distance = min_distance
 
-    def filter_docs(self, query: str, docs):
-        if not docs:
-            return []
-
-        top_score = docs[0][1]
-        query_has_entities = bool(self.extract_entities(query))
-        filtered = []
-
-        for doc, score in docs:
-            lexical_score = self.lexical_overlap(query, doc["text"])
-            entity_score = self.entity_overlap(query, doc["text"])
-
-            if score < self.min_score:
-                continue
-
-            if query_has_entities and entity_score == 0 and score < top_score * 0.9:
-                continue
-
-            if score < top_score * 0.75 and lexical_score < 0.2 and entity_score == 0:
-                continue
-
-            filtered.append((doc, score))
-
-        return filtered
+    # -------------------------
+    # TEXT PROCESSING
+    # -------------------------
 
     def tokenize(self, text: str) -> list[str]:
         return re.findall(r"\b[a-zA-Z][a-zA-Z']+\b", text.lower())
 
     def content_tokens(self, text: str) -> set[str]:
-        return {token for token in self.tokenize(text) if token not in STOPWORDS}
+        return {t for t in self.tokenize(text) if t not in STOPWORDS}
 
     def lexical_overlap(self, query: str, text: str) -> float:
-        query_tokens = self.content_tokens(query)
-        if not query_tokens:
+        q = self.content_tokens(query)
+        if not q:
             return 0.0
-
-        text_tokens = self.content_tokens(text)
-        overlap = query_tokens & text_tokens
-        return len(overlap) / len(query_tokens)
+        t = self.content_tokens(text)
+        return len(q & t) / len(q)
 
     def extract_entities(self, text: str):
-        # naive: capitalized words
         return re.findall(r"\b[A-Z][a-zA-Z]+\b", text)
 
     def entity_overlap(self, query: str, text: str) -> float:
-        query_entities = {entity.lower() for entity in self.extract_entities(query)}
-        if not query_entities:
+        q_entities = {e.lower() for e in self.extract_entities(query)}
+        if not q_entities:
             return 0.0
+        t = text.lower()
+        return sum(1 for e in q_entities if e in t) / len(q_entities)
 
-        text_lower = text.lower()
-        matches = sum(1 for entity in query_entities if entity in text_lower)
-        return matches / len(query_entities)
+    # -------------------------
+    # SCORE NORMALIZATION
+    # -------------------------
 
-    def score_doc(self, query: str, doc: dict, base_score: float) -> float:
-        lexical_score = self.lexical_overlap(query, doc["text"])
-        entity_score = self.entity_overlap(query, doc["text"])
-        return base_score + (0.25 * lexical_score) + (0.2 * entity_score)
+    def to_similarity(self, distance: float) -> float:
+        """
+        Convert cosine distance → similarity
+        so higher = better everywhere in pipeline
+        """
+        sim = 1.0 - distance
+        return max(0.0, min(1.0, sim))
+
+    def score_doc(self, query: str, doc: dict, distance: float) -> float:
+        sim = self.to_similarity(distance)
+
+        lexical = self.lexical_overlap(query, doc["text"])
+        entity = self.entity_overlap(query, doc["text"])
+
+        return sim + (0.25 * lexical) + (0.2 * entity)
+
+    # -------------------------
+    # SEARCH HELPERS
+    # -------------------------
 
     def keyword_search(self, entity: str):
         results = []
-        for doc in self.vector_store.documents:
+        for doc in self.vector_store.get_all_documents():
             if entity.lower() in doc["text"].lower():
-                results.append((doc, 1.0))  # high confidence
+                results.append((doc, 0.0))  # treat as perfect match (distance=0)
         return results
 
     def summarize_docs(self, docs):
@@ -111,65 +87,64 @@ class Retriever:
             for doc, score in docs
         ]
 
-    # ---- Retrieval ----
+    # -------------------------
+    # RETRIEVAL CORE
+    # -------------------------
+
     def retrieve_docs(self, query: str, k: int = 2):
         docs = self.vector_store.search(query, k)
         logger.debug("Retrieval query=%s docs=%s", query, self.summarize_docs(docs))
         return docs
 
     def retrieve_docs_multi_hop(self, query: str, k: int = 2):
-        seen_searches = set()
+        seen = set()
 
         def search_once(text: str, limit: int):
-            cache_key = (text.strip().lower(), limit)
-            if cache_key in seen_searches:
+            key = (text.strip().lower(), limit)
+            if key in seen:
                 return []
-            seen_searches.add(cache_key)
+            seen.add(key)
             return self.vector_store.search(text, k=limit)
 
-        # ---- 1. ENTITY-FIRST RETRIEVAL ----
+        # 1. entity expansion
         query_entities = self.extract_entities(query)
-        logger.debug("Multi-hop query=%s query_entities=%s", query, query_entities)
+
         entity_docs = []
-        for entity in query_entities[:3]:  # limit expansion
-            # keyword first (exact match)
+        for entity in query_entities[:3]:
             entity_docs.extend(self.keyword_search(entity))
+            entity_docs.extend(search_once(entity, 2))
 
-            # semantic fallback
-            entity_docs.extend(search_once(entity, limit=2))
-        logger.debug("Entity-first docs=%s", self.summarize_docs(entity_docs))
+        # 2. semantic pass
+        first_pass = search_once(query, 3)
 
-        # ---- 2. FIRST PASS (SEMANTIC) ----
-        first_pass = search_once(query, limit=3)
-        logger.debug("First-pass docs=%s", self.summarize_docs(first_pass))
-
-        # ---- 3. MULTI-HOP EXPANSION ----
+        # 3. second hop
         doc_entities = set()
         for doc, _ in first_pass:
             doc_entities.update(self.extract_entities(doc["text"]))
 
         second_pass = []
-        for entity in list(doc_entities)[:3]:  # limit again
-            second_pass.extend(search_once(entity, limit=1))
-        logger.debug("Second-pass docs=%s", self.summarize_docs(second_pass))
+        for entity in list(doc_entities)[:3]:
+            second_pass.extend(search_once(entity, 1))
 
-        # ---- 4. MERGE + DEDUPE ----
+        # 4. merge
         all_docs = {}
 
-        def add_docs(docs, boost=0.0):
-            for doc, score in docs:
-                score = self.score_doc(query, doc, score + boost)
+        def add(docs, boost=0.0):
+            for doc, distance in docs:
+                score = self.score_doc(query, doc, distance + boost)
                 doc_id = doc["id"]
-                existing = all_docs.get(doc_id)
-                if existing is None or score > existing[1]:
+
+                if doc_id not in all_docs or score > all_docs[doc_id][1]:
                     all_docs[doc_id] = (doc, score)
 
-        add_docs(entity_docs, boost=0.05)  # entity signal
-        add_docs(first_pass, boost=0.0)  # base
-        add_docs(second_pass, boost=0.1)  # multi-hop signal
+        add(entity_docs, 0.05)
+        add(first_pass, 0.0)
+        add(second_pass, 0.1)
 
-        # ---- 5. FINAL RANKING ----
+        # 5. FINAL RANKING (HIGHER IS BETTER)
         ranked = sorted(all_docs.values(), key=lambda x: x[1], reverse=True)
+
         logger.debug("Ranked docs=%s", self.summarize_docs(ranked))
+        print("SEARCH RESULTS:", ranked[:k])
 
         return ranked[:k]
